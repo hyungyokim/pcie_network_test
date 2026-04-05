@@ -1,101 +1,113 @@
-# OpenShift Profile Bandwidth Tests
+# OpenShift Profile Benchmarks
 
-This directory contains two small benchmarking utilities:
+This repository contains two profiling utilities:
 
-- `measure_ib_bw.sh`: runs InfiniBand write/read bandwidth tests and saves per-run logs.
-- `measure_pcie_bw.cu`: measures GPU PCIe host-to-device and device-to-host transfer latency/bandwidth and emits CSV-formatted results.
+- `profile_ib.sh`: runs InfiniBand bandwidth and latency measurements.
+- `profile_pcie.cu`: measures PCIe transfer latency and derived bandwidth for host-to-device and device-to-host copies.
 
 ## Files
 
-- `measure_ib_bw.sh`
-- `measure_pcie_bw.cu`
+- `profile_ib.sh`
+- `profile_pcie.cu`
 
-## InfiniBand Bandwidth Test
+## InfiniBand Profiling
 
-The InfiniBand script wraps both `ib_write_bw` and `ib_read_bw`, runs them with CUDA DMA-BUF enabled, and stores the output under `ib_logs/`.
+`profile_ib.sh` runs four perftest binaries and saves each run to `ib_logs/`:
+
+- `ib_write_bw`
+- `ib_read_bw`
+- `ib_write_lat`
+- `ib_read_lat`
 
 ### Prerequisites
 
-- `ib_write_bw` and `ib_read_bw` must be installed and available in `PATH`.
+- `ib_write_bw`, `ib_read_bw`, `ib_write_lat`, and `ib_read_lat` must be installed and available in `PATH`, or supplied through `--perftest-dir`.
 - The selected Mellanox device must exist on both machines.
-- Update `<master_ip_addr>` with the server node's reachable IP address.
+- Replace `<master_ip_addr>` with the server node's reachable IP address.
 
 ### Run
 
 On the server:
 
 ```bash
-./measure_ib_bw.sh --rank 0 --master-ip <master_ip_addr> --mlx-device mlx5_6
+chmod +x profile_ib.sh
+./profile_ib.sh --rank 0 --master-ip <master_ip_addr> --mlx-device mlx5_6
 ```
 
 On the client:
 
 ```bash
-./measure_ib_bw.sh --rank 1 --master-ip <master_ip_addr> --mlx-device mlx5_6
+chmod +x profile_ib.sh
+./profile_ib.sh --rank 1 --master-ip <master_ip_addr> --mlx-device mlx5_6
+```
+
+If the perftest binaries are not in `PATH`, point the script at their directory:
+
+```bash
+./profile_ib.sh --rank 0 --master-ip <master_ip_addr> --mlx-device mlx5_6 --perftest-dir /path/to/perftest/bin
 ```
 
 ### IB Logs
 
-The script creates an `ib_logs/` directory in this repository and writes timestamped logs there.
+The script creates `ib_logs/` in this repository and writes one timestamped log per measurement.
 
-Expected log names:
+Expected filenames:
 
-- Server:
-  - `ib_logs/ib_write_bw_server_<YYYYMMDD_HHMMSS>.log`
-  - `ib_logs/ib_read_bw_server_<YYYYMMDD_HHMMSS>.log`
-- Client:
-  - `ib_logs/ib_write_bw_client_rank1_<YYYYMMDD_HHMMSS>.log`
-  - `ib_logs/ib_read_bw_client_rank1_<YYYYMMDD_HHMMSS>.log`
+- `ib_logs/ib_write_bw_server_<YYYYMMDD_HHMMSS>.log`
+- `ib_logs/ib_read_bw_server_<YYYYMMDD_HHMMSS>.log`
+- `ib_logs/ib_write_lat_server_<YYYYMMDD_HHMMSS>.log`
+- `ib_logs/ib_read_lat_server_<YYYYMMDD_HHMMSS>.log`
+- `ib_logs/ib_write_bw_client_rank1_<YYYYMMDD_HHMMSS>.log`
+- `ib_logs/ib_read_bw_client_rank1_<YYYYMMDD_HHMMSS>.log`
+- `ib_logs/ib_write_lat_client_rank1_<YYYYMMDD_HHMMSS>.log`
+- `ib_logs/ib_read_lat_client_rank1_<YYYYMMDD_HHMMSS>.log`
 
-These logs are the raw `perftest` outputs from `ib_write_bw` and `ib_read_bw`. They are useful for:
+These files contain the raw `perftest` output, including the exact command used, the selected mlx device, bandwidth summaries for the `*_bw` runs, and latency summaries for the `*_lat` runs.
 
-- confirming which device and options were used,
-- reviewing the reported bandwidth values in Gbit/s,
-- comparing server/client runs collected at the same timestamp,
-- keeping an archival record of each measurement sweep.
-
-## PCIe Bandwidth Test
+## PCIe Profiling
 
 Compile the CUDA benchmark with:
 
 ```bash
-nvcc -O3 -o measure_pcie_bw measure_pcie_bw.cu
+nvcc -O3 -o profile_pcie profile_pcie.cu
 ```
 
-Then run it and save the CSV output:
+Run it with:
 
 ```bash
-./measure_pcie_bw | tee pcie_sweep.csv
+./profile_pcie
 ```
 
-Note: the compile command above creates a binary named `measure_pcie_bw`. If you want to run `./pcie_latency_test | tee pcie_sweep.csv` instead, compile with `-o pcie_latency_test`.
+You can optionally choose a different CSV path:
+
+```bash
+./profile_pcie --output pcie_logs/custom_profile.csv
+```
 
 ### PCIe Output
 
-The PCIe benchmark prints CSV directly to standard output with the following header:
+`profile_pcie` prints CSV to standard output and also writes the same data to:
+
+- `pcie_logs/profile_pcie.csv`
+
+The CSV header is:
 
 ```text
-direction,size_bytes,avg_us,min_us,max_us,GBps
+direction,size_bytes,avg_latency_us,min_latency_us,max_latency_us,bandwidth_GBps
 ```
 
-Saving with `tee` writes the same output to:
+Each row reports both latency and bandwidth for one transfer direction and size:
 
-- `pcie_sweep.csv`
-
-Each row records one transfer direction and payload size:
-
-- `direction`: `H2D` for host-to-device, `D2H` for device-to-host
+- `direction`: `H2D` for host-to-device or `D2H` for device-to-host
 - `size_bytes`: transfer size in bytes
-- `avg_us`: average transfer latency in microseconds
-- `min_us`: minimum observed latency in microseconds
-- `max_us`: maximum observed latency in microseconds
-- `GBps`: effective transfer bandwidth in GB/s computed from the average latency
-
-This file is the main artifact for plotting PCIe transfer performance across message sizes.
+- `avg_latency_us`: average latency in microseconds
+- `min_latency_us`: minimum observed latency in microseconds
+- `max_latency_us`: maximum observed latency in microseconds
+- `bandwidth_GBps`: effective bandwidth in GB/s computed from the average latency
 
 ## Output Summary
 
-Running the workflows in this directory produces the following saved outputs:
+Running the tools in this repository produces:
 
-- `ib_logs/*.log`: raw timestamped InfiniBand bandwidth logs for `ib_write_bw` and `ib_read_bw`
-- `pcie_sweep.csv`: CSV table of PCIe transfer latency and bandwidth results
+- `ib_logs/*.log`: raw InfiniBand bandwidth and latency logs
+- `pcie_logs/profile_pcie.csv`: PCIe latency and bandwidth sweep in CSV format
