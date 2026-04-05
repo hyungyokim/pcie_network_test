@@ -54,7 +54,10 @@ IB_WRITE_LAT="$(resolve_binary ib_write_lat)"
 IB_READ_LAT="$(resolve_binary ib_read_lat)"
 
 for bin in "$IB_WRITE_BW" "$IB_READ_BW" "$IB_WRITE_LAT" "$IB_READ_LAT"; do
-  command -v "$bin" >/dev/null || { echo "Required binary not found: $bin"; exit 1; }
+  command -v "$bin" >/dev/null 2>&1 || {
+    echo "Required binary not found: $bin"
+    exit 1
+  }
 done
 
 LOG_DIR="ib_logs"
@@ -88,15 +91,19 @@ run_profile() {
   echo "[INFO] Running ${name} (${role}) -> ${log_file}"
   printf '[CMD]'; printf ' %q' "${cmd[@]}"; printf '\n'
 
-  "${cmd[@]}" | tee "$log_file"
+  "${cmd[@]}" 2>&1 | tee "$log_file"
 }
 
 echo "[INFO] rank=$RANK master_ip=$MASTER_IP mlx=$MLX_DEVICE"
 echo "[INFO] Logs -> $LOG_DIR"
 
-run_profile "$IB_WRITE_BW" "ib_write_bw" -a -f 1 --report_gbits --use_cuda=0 --use_cuda_dmabuf
-run_profile "$IB_READ_BW" "ib_read_bw" -a -f 1 --report_gbits --use_cuda=0 --use_cuda_dmabuf
-run_profile "$IB_WRITE_LAT" "ib_write_lat" -a --use_cuda=0 --use_cuda_dmabuf
-run_profile "$IB_READ_LAT" "ib_read_lat" -a --use_cuda=0 --use_cuda_dmabuf
+CUDA_ARGS=(--use_cuda=0 --use_cuda_dmabuf)
+
+run_profile "$IB_WRITE_BW" "ib_write_bw" -a -f 1 --report_gbits "${CUDA_ARGS[@]}"
+run_profile "$IB_READ_BW" "ib_read_bw" -a -f 1 --report_gbits "${CUDA_ARGS[@]}"
+
+echo "[INFO] Skipping ib_write_lat: perftest does not support CUDA write latency tests"
+
+run_profile "$IB_READ_LAT" "ib_read_lat" -a "${CUDA_ARGS[@]}"
 
 echo "[INFO] Done."
